@@ -5,15 +5,15 @@
 // gestures. You can also use WidgetTester to find child widgets in the widget
 // tree, read text, and verify that the values of widget properties are correct.
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:invoice_mobile/main.dart';
 
 void main() {
-  testWidgets('invoice workspace renders', (WidgetTester tester) async {
+  testWidgets('invoice app starts while checking authentication', (WidgetTester tester) async {
     await tester.pumpWidget(const InvoiceApp());
 
-    expect(find.text('Invoice Operations'), findsOneWidget);
-    expect(find.text('New invoice'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });
 }

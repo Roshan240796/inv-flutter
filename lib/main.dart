@@ -1,21 +1,73 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
-
 const baseUrl = 'http://10.0.2.2:8080';
-const username = 'admin';
-const password = 'admin';
+
+class AuthService {
+  static const _storage = FlutterSecureStorage();
+  static const _tokenKey = 'jwt_token';
+
+  static Future<String?> loadToken() => _storage.read(key: _tokenKey);
+
+  static Future<String> login(String username, String password) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/api/auth/login'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'username': username, 'password': password}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Invalid username or password.');
+    }
+    final token = (jsonDecode(response.body) as Map<String, dynamic>)['token'] as String?;
+    if (token == null || token.isEmpty) throw Exception('Authentication token missing.');
+    await _storage.write(key: _tokenKey, value: token);
+    return token;
+  }
+
+  static Future<void> logout() => _storage.delete(key: _tokenKey);
+}
 
 void main() {
   runApp(const InvoiceApp());
 }
 
-class InvoiceApp extends StatelessWidget {
+class InvoiceApp extends StatefulWidget {
   const InvoiceApp({super.key});
 
   @override
+  State<InvoiceApp> createState() => _InvoiceAppState();
+}
+
+class _InvoiceAppState extends State<InvoiceApp> {
+  String? _token;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    AuthService.loadToken().then((token) {
+      if (!mounted) return;
+      setState(() {
+        _token = token;
+        _loading = false;
+      });
+    });
+  }
+
+  void _loggedIn(String token) => setState(() => _token = token);
+
+  Future<void> _logout() async {
+    await AuthService.logout();
+    if (mounted) setState(() => _token = null);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const MaterialApp(home: Scaffold(body: Center(child: CircularProgressIndicator())));
+    }
     return MaterialApp(
       title: 'Invoice Operations',
       theme: ThemeData(
@@ -25,7 +77,9 @@ class InvoiceApp extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      home: const InvoiceHomePage(),
+      home: _token == null
+          ? _LoginPage(onLoggedIn: _loggedIn)
+          : InvoiceHomePage(token: _token!, onLogout: _logout),
     );
   }
 }
@@ -60,7 +114,10 @@ class Invoice {
 }
 
 class InvoiceHomePage extends StatefulWidget {
-  const InvoiceHomePage({super.key});
+  const InvoiceHomePage({super.key, required this.token, required this.onLogout});
+
+  final String token;
+  final Future<void> Function() onLogout;
 
   @override
   State<InvoiceHomePage> createState() => _InvoiceHomePageState();
@@ -70,7 +127,7 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
   final _client = http.Client();
   late Future<List<Invoice>> _invoices;
 
-  String get _authHeader => 'Basic ${base64Encode(utf8.encode('$username:$password'))}';
+  String get _authHeader => 'Bearer ${widget.token}';
 
   @override
   void initState() {
@@ -90,6 +147,9 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
       headers: {'Authorization': _authHeader},
     );
     if (response.statusCode != 200) {
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        await widget.onLogout();
+      }
       throw Exception('Could not load invoices (${response.statusCode})');
     }
     final data = jsonDecode(response.body) as List<dynamic>;
@@ -112,6 +172,9 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
       }),
     );
     if (response.statusCode != 201) {
+      if (response.statusCode == 401 || response.statusCode == 403) {
+        await widget.onLogout();
+      }
       throw Exception('Could not create invoice (${response.statusCode})');
     }
     setState(() {
@@ -209,6 +272,96 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+class _LoginPage extends StatefulWidget {
+  const _LoginPage({required this.onLoggedIn});
+
+  final ValueChanged<String> onLoggedIn;
+
+  @override
+  State<_LoginPage> createState() => _LoginPageState();
+}
+
+class _LoginPageState extends State<_LoginPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _username = TextEditingController();
+  final _password = TextEditingController();
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _username.dispose();
+    _password.dispose();
+    super.dispose();
+  }
+
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final token = await AuthService.login(_username.text.trim(), _password.text);
+      if (mounted) widget.onLoggedIn(token);
+    } catch (error) {
+      if (mounted) setState(() => _error = error.toString());
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  const Icon(Icons.account_balance_wallet_rounded, size: 64),
+                  const SizedBox(height: 12),
+                  Text('Invoice Login', style: Theme.of(context).textTheme.headlineMedium),
+                  const SizedBox(height: 24),
+                  TextFormField(
+                    controller: _username,
+                    decoration: const InputDecoration(labelText: 'Username', border: OutlineInputBorder()),
+                    validator: (value) => value == null || value.trim().isEmpty ? 'Enter username' : null,
+                  ),
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    controller: _password,
+                    obscureText: true,
+                    decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder()),
+                    validator: (value) => value == null || value.isEmpty ? 'Enter password' : null,
+                  ),
+                  if (_error != null) ...[
+                    const SizedBox(height: 12),
+                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                  ],
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: _loading ? null : _login,
+                      icon: _loading ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.login),
+                      label: Text(_loading ? 'Signing in...' : 'Login'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
