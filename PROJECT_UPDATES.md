@@ -1,8 +1,14 @@
 # Invoice Application Milestones
 
+## Release Versioning
+
+- Current application version: `1.4.0+1`
+- Major milestone versioning is applied as features are completed.
+- Each milestone section below includes its release version label.
+
 ## Completed Milestones
 
-### Project Setup
+### v1.0.0 — Project Setup
 - [x] Install Flutter.
 - [x] Install Android Studio.
 - [x] Configure the Android SDK.
@@ -24,7 +30,7 @@ server.address=0.0.0.0
 
 ---
 
-### Authentication
+### v1.1.0 — Authentication
 - [x] Create a Flutter login screen.
 - [x] Remove hard-coded Flutter credentials.
 - [x] Store JWT credentials securely using `flutter_secure_storage`.
@@ -51,7 +57,7 @@ Authorization: Bearer <JWT_TOKEN>
 
 ---
 
-### Invoice Lifecycle
+### v1.2.0 — Invoice Lifecycle
 - [x] Add invoice details endpoint.
 - [x] Add invoice editing endpoint.
 - [x] Add invoice deletion endpoint.
@@ -88,7 +94,7 @@ REJECTED   -> SUBMITTED
 
 ---
 
-### Invoice Information
+### v1.3.0 — Invoice Information
 - [x] Add supplier details.
 - [x] Add customer address.
 - [x] Add customer contact information.
@@ -106,7 +112,7 @@ REJECTED   -> SUBMITTED
 
 ---
 
-### Testing and Version Control
+### v1.4.0 — Testing and Version Control
 - [x] Add backend authentication tests.
 - [x] Add backend invoice lifecycle tests.
 - [x] Add Flutter widget tests.
@@ -122,7 +128,7 @@ REJECTED   -> SUBMITTED
 
 ## Partially Completed Milestones
 
-### Authentication
+### v1.5.0 — Advanced Authentication
 - [ ] Implement full role-based permissions.
 - [ ] Add database-backed users.
 - [ ] Add refresh tokens.
@@ -130,7 +136,7 @@ REJECTED   -> SUBMITTED
 - [ ] Add explicit client-side token expiration detection.
 - [ ] Add production-grade secret management.
 
-### Invoice Lifecycle
+### v1.6.0 — Advanced Invoice Lifecycle
 - [ ] Add Flutter invoice deletion controls.
 - [ ] Add Flutter status management controls.
 - [ ] Add invoice approval workflow UI.
