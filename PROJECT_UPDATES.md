@@ -2,7 +2,7 @@
 
 ## Release Versioning
 
-- Current application version: `1.4.0+1`
+- Current application version: `1.7.0+2`
 - Major milestone versioning is applied as features are completed.
 - Each milestone section below includes its release version label.
 
@@ -129,34 +129,38 @@ REJECTED   -> SUBMITTED
 ## Partially Completed Milestones
 
 ### v1.5.0 — Advanced Authentication
-- [ ] Implement full role-based permissions.
-- [ ] Add database-backed users.
-- [ ] Add refresh tokens.
-- [ ] Add automatic token refresh.
-- [ ] Add explicit client-side token expiration detection.
+- [x] Implement role-based invoice deletion permissions (`ADMIN`).
+- [x] Add database-backed users.
+- [x] Add persisted, hashed refresh tokens.
+- [x] Add refresh-token rotation and logout revocation.
+- [x] Add automatic Flutter token refresh.
+- [x] Add explicit client-side token expiration detection.
 - [ ] Add production-grade secret management.
 
 ### v1.6.0 — Advanced Invoice Lifecycle
-- [ ] Add Flutter invoice deletion controls.
-- [ ] Add Flutter status management controls.
-- [ ] Add invoice approval workflow UI.
-- [ ] Add invoice rejection reasons.
-- [ ] Add invoice payment tracking.
+- [x] Add Flutter invoice deletion controls.
+- [x] Add Flutter status management controls.
+- [x] Add invoice approval workflow UI.
+- [x] Add invoice rejection reasons.
+- [x] Add invoice payment tracking fields and paid-date persistence.
 
 ---
 
 ## Features Still To Implement
 
 ### Invoice Search and Filtering
-- [ ] Add invoice search.
-- [ ] Filter by customer.
-- [ ] Filter by status.
-- [ ] Filter by date.
-- [ ] Filter by currency.
-- [ ] Sort by invoice number.
-- [ ] Sort by amount.
-- [ ] Sort by date.
-- [ ] Add pagination.
+- [x] Add server-side invoice search by number or customer.
+- [x] Filter by customer through the API.
+- [x] Filter by status through the API and Flutter list.
+- [x] Filter by issued date range through the API.
+- [x] Filter by currency through the API.
+- [x] Sort by invoice number, amount, and date through the API.
+- [x] Add server-side pagination and Flutter page controls.
+
+Implementation notes:
+- Invoice listing accepts `search`, `customer`, `status`, `currency`, `issuedFrom`, `issuedTo`, `page`, `size`, and `sort` query parameters.
+- Flutter search is debounced and the status/sort controls use the paged endpoint.
+- `flutter analyze` remains to be rerun after repairing the local Flutter SDK installation; the current SDK path is missing its Dart SDK.
 
 ### XML Integration
 - [ ] Upload XML invoices.
@@ -273,7 +277,7 @@ REJECTED   -> SUBMITTED
 | Invoice Lifecycle | ✅ Completed |
 | Testing and Version Control | ✅ Completed |
 | Invoice Information | ✅ Completed |
-| Invoice Search and Filtering | ⬜ Not Started |
+| Invoice Search and Filtering | ✅ Implemented |
 | XML Integration | ⬜ Not Started |
 | SFTP Integration | ⬜ Not Started |
 | REST API Integration | ⬜ Not Started |

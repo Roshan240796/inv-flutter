@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -9,10 +10,43 @@ const baseUrl = 'http://10.0.2.2:8080';
 class AuthService {
   static const _storage = FlutterSecureStorage();
   static const _tokenKey = 'jwt_token';
+  static const _refreshTokenKey = 'refresh_token';
 
-  static Future<String?> loadToken() => _storage.read(key: _tokenKey);
+  static Future<String?> loadToken() async {
+    final token = await _storage.read(key: _tokenKey);
+    if (token == null || !_isExpired(token)) return token;
+    return _refreshAccessToken();
+  }
 
-  static Future<void> clearToken() => _storage.delete(key: _tokenKey);
+  static Future<void> clearToken() async {
+    await _storage.delete(key: _tokenKey);
+    await _storage.delete(key: _refreshTokenKey);
+  }
+
+  static bool _isExpired(String token) {
+    try {
+      final parts = token.split('.');
+      final payload = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(parts[1])))) as Map<String, dynamic>;
+      final expiry = (payload['exp'] as num).toInt();
+      return DateTime.now().millisecondsSinceEpoch >= expiry * 1000 - 30000;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  static Future<String?> _refreshAccessToken() async {
+    final refresh = await _storage.read(key: _refreshTokenKey);
+    if (refresh == null || refresh.isEmpty) { await clearToken(); return null; }
+    final response = await http.post(Uri.parse('$baseUrl/api/auth/refresh'), headers: {'Content-Type': 'application/json'}, body: jsonEncode({'refreshToken': refresh}));
+    if (response.statusCode != 200) { await clearToken(); return null; }
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final token = body['token'] as String?;
+    final nextRefresh = body['refreshToken'] as String?;
+    if (token == null || nextRefresh == null) { await clearToken(); return null; }
+    await _storage.write(key: _tokenKey, value: token);
+    await _storage.write(key: _refreshTokenKey, value: nextRefresh);
+    return token;
+  }
 
   static Future<String> login(String username, String password) async {
     final response = await http.post(
@@ -25,23 +59,45 @@ class AuthService {
       throw Exception('Invalid username or password.');
     }
 
-    final token = (jsonDecode(response.body) as Map<String, dynamic>)['token'] as String?;
+    final body = jsonDecode(response.body) as Map<String, dynamic>;
+    final token = body['token'] as String?;
     if (token == null || token.isEmpty) {
       throw Exception('Authentication token missing.');
     }
 
     await _storage.write(key: _tokenKey, value: token);
+    final refreshToken = body['refreshToken'] as String?;
+    if (refreshToken != null) await _storage.write(key: _refreshTokenKey, value: refreshToken);
     return token;
   }
 
-  static Future<List<InvoiceSummary>> fetchInvoices() async {
+  static Future<List<InvoiceSummary>> fetchInvoices({
+    String search = '',
+    String customer = '',
+    String? status,
+    String? currency,
+    DateTime? issuedFrom,
+    DateTime? issuedTo,
+    int page = 0,
+    int size = 20,
+    String sort = 'issuedOn,desc',
+  }) async {
     final token = await loadToken();
     if (token == null || token.isEmpty) {
       throw const SessionExpiredException();
     }
 
+    final query = <String, String>{
+      'page': '$page', 'size': '$size', 'sort': sort,
+      if (search.trim().isNotEmpty) 'search': search.trim(),
+      if (customer.trim().isNotEmpty) 'customer': customer.trim(),
+      if (status != null) 'status': status,
+      if (currency != null) 'currency': currency,
+      if (issuedFrom != null) 'issuedFrom': issuedFrom.toIso8601String().split('T').first,
+      if (issuedTo != null) 'issuedTo': issuedTo.toIso8601String().split('T').first,
+    };
     final response = await http.get(
-      Uri.parse('$baseUrl/api/invoices'),
+      Uri.parse('$baseUrl/api/invoices').replace(queryParameters: query),
       headers: {'Authorization': 'Bearer $token', 'Accept': 'application/json'},
     );
 
@@ -54,10 +110,37 @@ class AuthService {
       throw Exception('Could not load invoices (${response.statusCode})');
     }
 
-    final data = jsonDecode(response.body) as List<dynamic>;
+    final decoded = jsonDecode(response.body);
+    final data = decoded is List ? decoded : (decoded as Map<String, dynamic>)['content'] as List<dynamic>;
     return data
         .map((item) => InvoiceSummary.fromJson(item as Map<String, dynamic>))
         .toList();
+  }
+
+  static Future<void> deleteInvoice(int invoiceId) async {
+    final response = await _authorized('DELETE', '/api/invoices/$invoiceId');
+    if (response.statusCode == 401 || response.statusCode == 403) throw const SessionExpiredException();
+    if (response.statusCode != 204) throw Exception('Could not delete invoice (${response.statusCode})');
+  }
+
+  static Future<InvoiceSummary> updateStatus(int invoiceId, String status, {String? rejectionReason}) async {
+    final response = await _authorized('PATCH', '/api/invoices/$invoiceId/status', body: {
+      'status': status,
+      if (rejectionReason != null && rejectionReason.trim().isNotEmpty) 'rejectionReason': rejectionReason.trim(),
+    });
+    if (response.statusCode == 401 || response.statusCode == 403) throw const SessionExpiredException();
+    if (response.statusCode != 200) throw Exception('Could not update status (${response.statusCode})');
+    return InvoiceSummary.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  static Future<http.Response> _authorized(String method, String path, {Map<String, dynamic>? body}) async {
+    final token = await loadToken();
+    if (token == null || token.isEmpty) throw const SessionExpiredException();
+    final headers = {'Authorization': 'Bearer $token', 'Accept': 'application/json'};
+    if (body != null) headers['Content-Type'] = 'application/json';
+    final request = http.Request(method, Uri.parse('$baseUrl$path'))..headers.addAll(headers);
+    if (body != null) request.body = jsonEncode(body);
+    return http.Response.fromStream(await request.send());
   }
 
   static Future<InvoiceDetail> fetchInvoiceDetail(int invoiceId) async {
@@ -426,6 +509,12 @@ class InvoiceHomePage extends StatefulWidget {
 
 class _InvoiceHomePageState extends State<InvoiceHomePage> {
   late Future<List<InvoiceSummary>> _invoices;
+  final _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  String? _statusFilter;
+  String? _currencyFilter;
+  String _sort = 'issuedOn,desc';
+  int _page = 0;
 
   @override
   void initState() {
@@ -433,10 +522,53 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
     _invoices = AuthService.fetchInvoices();
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _queryChanged(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted) return;
+      _page = 0;
+      _refreshInvoices();
+    });
+  }
+
   Future<void> _refreshInvoices() async {
     setState(() {
-      _invoices = AuthService.fetchInvoices();
+      _invoices = AuthService.fetchInvoices(
+        search: _searchController.text,
+        status: _statusFilter,
+        currency: _currencyFilter,
+        page: _page,
+        sort: _sort,
+      );
     });
+  }
+
+  Future<void> _deleteInvoice(InvoiceSummary invoice) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete invoice?'),
+        content: Text('Delete ${invoice.number}? This cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    try {
+      await AuthService.deleteInvoice(invoice.id);
+      await _refreshInvoices();
+    } catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not delete invoice: $error')));
+    }
   }
 
   Future<void> _logoutAndReturn() async {
@@ -522,13 +654,68 @@ class _InvoiceHomePageState extends State<InvoiceHomePage> {
                   ],
                 ),
                 const SizedBox(height: 28),
+                TextField(
+                  controller: _searchController,
+                  onChanged: _queryChanged,
+                  decoration: const InputDecoration(
+                    labelText: 'Search invoices',
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String?>(
+                        value: _statusFilter,
+                        decoration: const InputDecoration(labelText: 'Status', border: OutlineInputBorder()),
+                        items: const [
+                          DropdownMenuItem<String?>(value: null, child: Text('All statuses')),
+                          DropdownMenuItem(value: 'DRAFT', child: Text('Draft')),
+                          DropdownMenuItem(value: 'SUBMITTED', child: Text('Submitted')),
+                          DropdownMenuItem(value: 'APPROVED', child: Text('Approved')),
+                          DropdownMenuItem(value: 'REJECTED', child: Text('Rejected')),
+                          DropdownMenuItem(value: 'PAID', child: Text('Paid')),
+                        ],
+                        onChanged: (value) { setState(() { _statusFilter = value; _page = 0; }); _refreshInvoices(); },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        value: _sort,
+                        decoration: const InputDecoration(labelText: 'Sort', border: OutlineInputBorder()),
+                        items: const [
+                          DropdownMenuItem(value: 'issuedOn,desc', child: Text('Newest')),
+                          DropdownMenuItem(value: 'issuedOn,asc', child: Text('Oldest')),
+                          DropdownMenuItem(value: 'amount,desc', child: Text('Highest amount')),
+                          DropdownMenuItem(value: 'amount,asc', child: Text('Lowest amount')),
+                          DropdownMenuItem(value: 'number,asc', child: Text('Invoice number')),
+                        ],
+                        onChanged: (value) { if (value == null) return; setState(() { _sort = value; _page = 0; }); _refreshInvoices(); },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
                 Text('Recent invoices', style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 10),
                 for (final invoice in invoices)
                   _InvoiceTile(
                     invoice: invoice,
                     onTap: () => _openInvoiceDetail(invoice.id),
+                    onDelete: () => _deleteInvoice(invoice),
                   ),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    IconButton(onPressed: _page == 0 ? null : () { setState(() => _page--); _refreshInvoices(); }, icon: const Icon(Icons.chevron_left)),
+                    Text('Page ${_page + 1}'),
+                    IconButton(onPressed: invoices.length < 20 ? null : () { setState(() => _page++); _refreshInvoices(); }, icon: const Icon(Icons.chevron_right)),
+                  ],
+                ),
               ],
             ),
           );
@@ -660,6 +847,10 @@ class _InvoiceDetailPageState extends State<InvoiceDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _InvoiceHeader(invoice: invoice),
+                  _StatusActions(
+                    invoice: invoice,
+                    onChanged: _refresh,
+                  ),
                   const SizedBox(height: 16),
                   _InfoCard(
                     title: 'Customer',
@@ -1357,10 +1548,11 @@ class _Metric extends StatelessWidget {
 }
 
 class _InvoiceTile extends StatelessWidget {
-  const _InvoiceTile({required this.invoice, required this.onTap});
+  const _InvoiceTile({required this.invoice, required this.onTap, required this.onDelete});
 
   final InvoiceSummary invoice;
   final VoidCallback onTap;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1372,15 +1564,70 @@ class _InvoiceTile extends StatelessWidget {
         ),
         title: Text(invoice.number),
         subtitle: Text('${invoice.customer} • ${invoice.issuedOn.toLocal().toString().split(' ').first}'),
-        trailing: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.end,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${invoice.currency} ${invoice.amount.toStringAsFixed(2)}'),
-            Text(invoice.status, style: Theme.of(context).textTheme.labelSmall),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text('${invoice.currency} ${invoice.amount.toStringAsFixed(2)}'),
+                Text(invoice.status, style: Theme.of(context).textTheme.labelSmall),
+              ],
+            ),
+            IconButton(icon: const Icon(Icons.delete_outline), tooltip: 'Delete invoice', onPressed: onDelete),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StatusActions extends StatelessWidget {
+  const _StatusActions({required this.invoice, required this.onChanged});
+
+  final InvoiceDetail invoice;
+  final Future<void> Function() onChanged;
+
+  List<String> get _nextStatuses => switch (invoice.status) {
+    'DRAFT' => ['SUBMITTED'],
+    'SUBMITTED' => ['APPROVED', 'REJECTED'],
+    'APPROVED' => ['PAID'],
+    'REJECTED' => ['DRAFT', 'SUBMITTED'],
+    _ => [],
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    if (_nextStatuses.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 8,
+      children: _nextStatuses.map((status) => OutlinedButton(
+        onPressed: () async {
+          String? reason;
+          if (status == 'REJECTED') {
+            reason = await showDialog<String>(
+              context: context,
+              builder: (context) {
+                final controller = TextEditingController();
+                return AlertDialog(
+                  title: const Text('Reject invoice'),
+                  content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'Reason')),
+                  actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(context, controller.text), child: const Text('Reject'))],
+                );
+              },
+            );
+            if (reason == null || reason.trim().isEmpty) return;
+          }
+          try {
+            await AuthService.updateStatus(invoice.id, status, rejectionReason: reason);
+            await onChanged();
+          } catch (error) {
+            if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not update status: $error')));
+          }
+        },
+        child: Text(status == 'SUBMITTED' ? 'Submit' : status[0] + status.substring(1).toLowerCase()),
+      )).toList(),
     );
   }
 }
