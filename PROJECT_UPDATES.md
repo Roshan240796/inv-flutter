@@ -2,7 +2,7 @@
 
 ## Release Versioning
 
-- Current application version: `1.7.0+2`
+- Current application version: `1.8.0+3`
 - Major milestone versioning is applied as features are completed.
 - Each milestone section below includes its release version label.
 
@@ -144,6 +144,15 @@ REJECTED   -> SUBMITTED
 - [x] Add invoice rejection reasons.
 - [x] Add invoice payment tracking fields and paid-date persistence.
 
+### v1.8.0 — XML Integration
+- [x] Upload XML invoices through an authenticated multipart endpoint.
+- [x] Parse XML invoices with external entity protection.
+- [x] Validate XML extension and required invoice fields.
+- [x] Map common invoice XML fields to a new draft invoice.
+- [x] Store the original XML file and attachment metadata.
+- [ ] Support standardized e-invoice formats.
+- [ ] Add XML processing logs.
+
 ---
 
 ## Features Still To Implement
@@ -163,12 +172,12 @@ Implementation notes:
 - `flutter analyze` remains to be rerun after repairing the local Flutter SDK installation; the current SDK path is missing its Dart SDK.
 
 ### XML Integration
-- [ ] Upload XML invoices.
-- [ ] Parse XML files.
-- [ ] Validate XML structure.
-- [ ] Display XML validation errors.
-- [ ] Store original XML files.
-- [ ] Map XML fields to invoice fields.
+- [x] Upload XML invoices.
+- [x] Parse XML files.
+- [x] Validate XML structure and required fields.
+- [x] Display XML validation errors through API responses.
+- [x] Store original XML files.
+- [x] Map common XML fields to invoice fields.
 - [ ] Support standardized e-invoice formats.
 - [ ] Add XML processing logs.
 
@@ -278,7 +287,7 @@ Implementation notes:
 | Testing and Version Control | ✅ Completed |
 | Invoice Information | ✅ Completed |
 | Invoice Search and Filtering | ✅ Implemented |
-| XML Integration | ⬜ Not Started |
+| XML Integration | 🟡 Partially Completed |
 | SFTP Integration | ⬜ Not Started |
 | REST API Integration | ⬜ Not Started |
 | ERP Integration | ⬜ Not Started |
