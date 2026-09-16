@@ -5,7 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
-const baseUrl = 'http://10.0.2.2:8080';
+const baseUrl = String.fromEnvironment(
+  'API_BASE_URL',
+  defaultValue: 'http://10.0.2.2:8080',
+);
 
 class AuthService {
   static const _storage = FlutterSecureStorage();
